@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tauri App</title>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs/dist/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
+    <style>
+      .container {
+        max-width: 800px;
+        margin: auto;
+        padding: 20px;
+        text-align: center;
+      }
+      .table-container {
+        margin-top: 20px;
+        text-align: left;
+      }
+      .table-container table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+      }
+      .table-container th,
+      .table-container td {
+        border: 1px solid #ccc;
+        padding: 8px;
+      }
+      #pdf-container {
+        margin-top: 20px;
+        display: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <h1>Up To Date</h1>
+
+      <p>Excel to PDF Utility</p>
+
+      <form class="row" id="upload-form" enctype="multipart/form-data">
+        <input type="file" id="file-input" accept=".xlsx, .xls" />
+        <button type="submit">Upload</button>
+      </form>
+
+      <div class="table-container" id="table-container" style="display: none">
+        <h2>Excel Data</h2>
+        <table id="excel-table">
+          <!--Table content will be added dynamically -->
+        </table>
+        <button id="save-pdf-button">Save as PDF</button>
+      </div>
+
+      <div id="pdf-container">
+        <embed
+          id="pdf-viewer"
+          type="application/pdf"
+          width="100%"
+          height="600px"
+        />
+      </div>
+    </div>
+
+    <script>
+      document
+        .getElementById("upload-form")
+        .addEventListener("submit", async function (event) {
+          event.preventDefault();
+
+          const fileInput = document.getElementById("file-input");
+          const file = fileInput.files[0];
+
+          if (!file) {
+            alert("Please select a file.");
+            return;
+          }
+
+          try {
+            // Read Excel file content
+            const workbook = await readExcelFile(file);
+
+            // Extract data from Excel
+            const excelData = extractDataFromExcel(workbook);
+
+            // Display data in UI
+            displayExcelData(excelData);
+
+            console.log("Excel data extracted and displayed.");
+          } catch (error) {
+            console.error("Error:", error);
+            alert("Error uploading or reading file.");
+          }
+        });
+
+      // Function to read Excel file using exceljs
+      async function readExcelFile(file) {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await file.arrayBuffer());
+        return workbook;
+      }
+
+      // Function to extract data from Excel workbook
+      function extractDataFromExcel(workbook) {
+        const excelData = [];
+
+        workbook.eachSheet((sheet) => {
+          const sheetData = {
+            name: sheet.name,
+            rows: [],
+          };
+
+          sheet.eachRow((row) => {
+            const rowData = [];
+            row.eachCell((cell) => {
+              rowData.push(cell.value);
+            });
+            sheetData.rows.push(rowData);
+          });
+
+          excelData.push(sheetData);
+        });
+
+        return excelData;
+      }
+
+      // Function to display Excel data in a table
+      function displayExcelData(data) {
+        const tableContainer = document.getElementById("table-container");
+        const excelTable = document.getElementById("excel-table");
+
+        // Clear previous table content
+        excelTable.innerHTML = "";
+
+        data.forEach((sheet) => {
+          // Check if sheet has rows
+          if (sheet.rows.length === 0) return;
+
+          // Add sheet name as a section header
+          const sheetHeader = `<tr><th colspan="${sheet.rows[0].length}">${sheet.name}</th></tr>`;
+          excelTable.innerHTML += sheetHeader;
+
+          // Create table headers
+          const headers = sheet.rows[0]
+            .map((header) => `<th>${header}</th>`)
+            .join("");
+          const headerRow = `<tr>${headers}</tr>`;
+          excelTable.innerHTML += headerRow;
+
+          // Add rows
+          sheet.rows.slice(1).forEach((row) => {
+            const rowHtml = `<tr>${row
+              .map((cell) => `<td>${cell !== null ? cell : ""}</td>`)
+              .join("")}</tr>`;
+            excelTable.innerHTML += rowHtml;
+          });
+        });
+
+        // Show table container
+        tableContainer.style.display = "block";
+
+        // Show Save as PDF button
+        const saveButton = document.getElementById("save-pdf-button");
+        saveButton.addEventListener("click", function () {
+          saveDataAsPDF(data);
+        });
+      }
+
+      // Function to save data as PDF using pdf-lib
+      async function saveDataAsPDF(data) {
+        const pdfDoc = await PDFLib.PDFDocument.create();
+        const pageWidth = 595; // A4 page width in points
+        const pageHeight = 842; // A4 page height in points
+        const margin = 50;
+        let y = pageHeight - margin; // Starting y position for text
+
+        // Iterate over each sheet in the data
+        for (const sheet of data) {
+          let pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+          y = pageHeight - margin; // Reset y position for new page
+
+          // Add sheet name as a header
+          pdfPage.drawText(`${sheet.name}:`, { x: margin, y, size: 18 });
+          y -= 30; // Adjust y position for the next element
+
+          // Check if sheet has rows and add table headers
+          if (sheet.rows && sheet.rows.length > 0) {
+            const headers = sheet.rows[0].join(" | ");
+            pdfPage.drawText(headers, { x: margin, y, size: 12 });
+            y -= 20; // Adjust y position for the next element
+
+            // Add rows of data
+            for (let j = 1; j < sheet.rows.length; j++) {
+              const row = sheet.rows[j].join(" | ");
+              pdfPage.drawText(row, { x: margin, y, size: 12 });
+              y -= 20; // Adjust y position for the next row
+
+              // Add new page if content overflows
+              if (y < margin) {
+                pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+                y = pageHeight - margin;
+              }
+            }
+          }
+        }
+
+        // Serialize the PDFDocument to bytes
+        const pdfBytes = await pdfDoc.save();
+
+        // Download the PDF file
+        downloadPDF(pdfBytes, "exported_data.pdf");
+
+        // Display PDF in UI
+        displayPDF(pdfBytes);
+      }
+
+      // Function to download PDF file
+      function downloadPDF(pdfBytes, filename) {
+        const blob = new Blob([pdfBytes], { type: "application/pdf" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+      }
+
+      // Function to display PDF in the UI
+      function displayPDF(pdfBytes) {
+        const pdfViewer = document.getElementById("pdf-viewer");
+        const blob = new Blob([pdfBytes], { type: "application/pdf" });
+        pdfViewer.setAttribute("src", URL.createObjectURL(blob));
+        document.getElementById("pdf-container").style.display = "block";
+      }
+    </script>
+  </body>
+</html>
